@@ -193,9 +193,49 @@ async function deleteSession(id){
  if(currentUser&&supabaseClient){try{await cloudDelete('sessions',id)}catch(e){console.error(e);toast('Local deletion saved; cloud deletion failed')}}
  toast('Session deleted');
 }
+
+async function deleteSankalp(id){
+  const s=data.sankalps.find(x=>x.id===id);
+  if(!s)return;
+  const sessionCount=data.sessions.filter(x=>x.sankalpId===id).length;
+  const milestoneCount=data.milestones.filter(x=>x.sankalpId===id).length;
+  const eventCount=data.events.filter(x=>x.sankalpId===id).length;
+  const ok=confirm(
+    `Delete "${s.name}" permanently?\n\n`+
+    `This will remove the Sankalp and its ${sessionCount} Japa session(s), `+
+    `${milestoneCount} milestone(s), and ${eventCount} activity record(s).\n\n`+
+    `This cannot be undone from SĀDHANA OS.`
+  );
+  if(!ok)return;
+
+  // Delete from cloud first when connected. This avoids the background local->cloud
+  // sync re-creating the record after the local deletion.
+  if(currentUser&&supabaseClient){
+    try{
+      const {error}=await supabaseClient.from('sankalps')
+        .delete()
+        .eq('id',id)
+        .eq('user_id',currentUser.id);
+      if(error)throw error;
+    }catch(e){
+      alert('Sankalp was NOT deleted.\n\nCloud deletion failed: '+(e.message||e));
+      return;
+    }
+  }
+
+  data.sessions=data.sessions.filter(x=>x.sankalpId!==id);
+  data.milestones=data.milestones.filter(x=>x.sankalpId!==id);
+  data.events=data.events.filter(x=>x.sankalpId!==id);
+  data.sankalps=data.sankalps.filter(x=>x.id!==id);
+  selectedId=null;
+  persist();
+  showView('home');
+  toast('Sankalp deleted');
+}
+
 function openDetail(id){selectedId=id;document.querySelectorAll('.view').forEach(x=>x.classList.remove('activeView'));document.getElementById('detail').classList.add('activeView');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));renderDetail(id)}
 function renderDetail(id){let s=data.sankalps.find(x=>x.id===id);if(!s){showView('home');return}let done=total(s),p=pct(s),rem=Math.max(0,s.target-done),req=requiredPerDay(s),avg=avgPerCalendarDay(s),proj=projection(s,avg),ss=sessionsOf(s).sort((a,b)=>b.date.localeCompare(a.date)||b.created.localeCompare(a.created)),ms=data.milestones.filter(x=>x.sankalpId===id).sort((a,b)=>a.amount-b.amount),defaultMs=[.25,.5,.75,1].map(r=>({id:'d'+r,sankalpId:id,amount:s.target*r,label:(r*100)+'%'})),allMs=[...ms];defaultMs.forEach(m=>{if(!allMs.some(x=>Math.abs(x.amount-m.amount)<.00001))allMs.push(m)});allMs.sort((a,b)=>a.amount-b.amount);let ev=data.events.filter(e=>e.sankalpId===id).slice(0,8);document.getElementById('detail').innerHTML=header('SANKALP DETAIL','',`<button class="btn" onclick="showView('home')">← Sankalp Library</button>`)+`<div class="card"><div class="detailHero"><div><div class="eyebrow">${esc(s.type)}</div><h2>${esc(s.name)}</h2><div class="muted">${esc(s.mantra)}${s.deity?' · '+esc(s.deity):''}</div>${s.purpose?`<p class="muted">${esc(s.purpose)}</p>`:''}</div><div style="text-align:right">${statusPill(s)}<div class="bigpct">${p.toFixed(1)}%</div></div></div><div class="progress" style="margin-top:17px"><i style="width:${p}%"></i></div><div class="metricGrid" style="margin-top:13px"><div class="metric"><div class="v">${done}</div><div class="l">Completed</div></div><div class="metric"><div class="v">${rem}</div><div class="l">Remaining</div></div><div class="metric"><div class="v">${req?req.toFixed(2):'—'}</div><div class="l">Required/day</div></div><div class="metric"><div class="v">${proj?fmt(proj):'—'}</div><div class="l">Projected</div></div></div></div>
-<div class="actions" style="margin-top:12px"><button class="btn primary" onclick="openModal('session','${s.id}')">＋ Record Japa</button><button class="btn" onclick="openModal('sankalp','${s.id}')">Edit</button><button class="btn" onclick="openModal('milestone','${s.id}')">＋ Milestone</button><button class="btn" onclick="openModal('whatif','${s.id}')">What If?</button><button class="btn" onclick="openModal('renew','${s.id}')">Renew</button></div>
+<div class="actions" style="margin-top:12px"><button class="btn primary" onclick="openModal('session','${s.id}')">＋ Record Japa</button><button class="btn" onclick="openModal('sankalp','${s.id}')">Edit</button><button class="btn" onclick="openModal('milestone','${s.id}')">＋ Milestone</button><button class="btn" onclick="openModal('whatif','${s.id}')">What If?</button><button class="btn" onclick="openModal('renew','${s.id}')">Renew</button><button class="btn danger" onclick="deleteSankalp('${s.id}')">Delete Sankalp</button></div>
 <div class="detailGrid"><div><div class="card"><div class="sectionhead"><h2>Pace & Timeline</h2></div><div class="metricGrid"><div class="metric"><div class="v">${fmt(s.start)}</div><div class="l">Started</div></div><div class="metric"><div class="v">${s.deadline?fmt(s.deadline):'No date'}</div><div class="l">Deadline</div></div><div class="metric"><div class="v">${daysLeft(s)===null?'—':daysLeft(s)}</div><div class="l">Days left</div></div><div class="metric"><div class="v">${avg?avg.toFixed(2):'0'}</div><div class="l">Actual/day</div></div></div><div style="margin-top:13px" class="${health(s)}"><b>${healthLabel(s)}</b> · ${s.deadline&&avg?`Current pace projects completion on ${fmt(proj)}`:'No deadline-based pace pressure.'}</div></div>
 <div class="card" style="margin-top:14px"><div class="sectionhead"><h2>Milestones</h2></div>${allMs.map(m=>{let doneM=done>=m.amount;return `<div class="milestone ${doneM?'done':''}"><span>${doneM?'✓':'○'} ${esc(m.label)}</span><b>${Math.min(100,doneM?100:(done/m.amount*100)).toFixed(0)}%</b></div>`}).join('')}</div>
 <div class="card" style="margin-top:14px"><div class="sectionhead"><h2>Recent Japa</h2></div><table class="table"><thead><tr><th>Date</th><th>Session</th><th>Amount</th><th>Duration</th></tr></thead><tbody>${ss.slice(0,10).map(x=>`<tr><td>${fmt(x.date)}</td><td>${esc(x.session)}</td><td>${x.amount} ${esc(s.unit)}</td><td>${x.duration?x.duration+' min':'—'}</td></tr>`).join('')||`<tr><td colspan="4" class="muted">No sessions yet.</td></tr>`}</tbody></table></div></div>
